@@ -8,3 +8,5 @@ class Agent(object):
 
     def act(self, observation):
         return self.action_space.sample()
+
+# just for testing 
