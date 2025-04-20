@@ -1,7 +1,7 @@
 import gym_super_mario_bros
 from nes_py.wrappers import JoypadSpace
 from gym_super_mario_bros.actions import COMPLEX_MOVEMENT
-from student_agent_test import Agent
+from student_agent import Agent
 import time
 
 # 创建环境（不需要额外的预处理 wrapper）

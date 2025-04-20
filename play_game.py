@@ -8,7 +8,7 @@ from nes_py.wrappers import JoypadSpace
 from gym_super_mario_bros.actions import COMPLEX_MOVEMENT
 
 # Adjust this import to wherever you defined your Agent class
-from student_agent import Agent  
+from student_agent_TA import Agent  
 
 def play_one_game():
     # 1) Build environment

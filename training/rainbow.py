@@ -6,6 +6,8 @@ from collections import deque, namedtuple
 import gym_super_mario_bros
 from nes_py.wrappers import JoypadSpace
 from gym_super_mario_bros.actions import COMPLEX_MOVEMENT
+from gym.wrappers import TimeLimit
+
 import gym
 import numpy as np
 from PIL import Image
@@ -34,8 +36,15 @@ PER_BETA_FRAMES         = 2000000     # anneal β to 1.0
 PER_EPSILON             = 0.1
 N_STEP                  = 5
 NOISY_SIGMA_INIT        = 2.5
+# new hyperparameters
+BACKWARD_PENALTY      = -2
+STAY_PENALTY         = -1
+DEATH_PENALTY        = -50
 
 MAX_FRAMES              = 44800000    # total training frames
+
+# 最大步数，超过便 truncated
+MAX_EPISODE_STEPS = 5000
 
 # -----------------------------
 # 1. Environment Wrappers
@@ -105,7 +114,9 @@ def make_env():
     env = SkipFrame(env, skip=4)
     env = GrayScaleResize(env)
     env = FrameStack(env, 4)
+    env = TimeLimit(env, max_episode_steps=MAX_EPISODE_STEPS)
     return env
+    
 
 # -----------------------------
 # 2. Noisy Linear Layer
@@ -351,23 +362,18 @@ import time
 # 6. Training Loop (按 episode)
 # -----------------------------
 def train(num_episodes,
-          checkpoint_path='checkpoints/rainbow/rainbow_dqn_mario.pth'):
+          checkpoint_path='checkpoints/rainbow_4/rainbow_dqn_mario.pth'):
     """
-    训练函数，每 100 集记录一次耗时、平均 reward & stage，并保存 checkpoint + reward history 图。
-
-    参数:
-        num_episodes (int): 总共要训练的 episode 数量
-        checkpoint_path (str): 用于读写模型和优化器状态的文件路径
-    返回:
-        reward_history (list of float), stage_history (list of int)
+    考虑 truncated、回头、停留、死亡罚分的训练函数。
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # make_env() 内部已经做了 TimeLimit(env, MAX_EPISODE_STEPS)
     env    = make_env()
     agent  = Agent(env.observation_space.shape, env.action_space.n, device)
 
     os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
 
-    # 尝试加载已有 checkpoint
+    # 尝试恢复 checkpoint
     start_ep = 1
     frame_idx = 0
     if os.path.isfile(checkpoint_path):
@@ -379,79 +385,126 @@ def train(num_episodes,
         start_ep  = ckpt.get('episode', 0) + 1
         print(f"Resuming from episode {start_ep}, frame {frame_idx}")
 
-    reward_history = []
-    stage_history  = []
-    durations      = []
-    chunk_start    = time.time()
+    reward_history     = []
+    env_reward_history = []
+    stage_history      = []
+    status_history     = []
+    durations          = []
+    chunk_start        = time.time()
 
     for ep in range(start_ep, num_episodes + 1):
-        state = env.reset()
-        ep_reward = 0.0
-        done = False
+        obs           = env.reset()
+        ep_reward     = 0.0
+        ep_env_reward = 0.0
+        prev_x        = None
+        prev_life     = None
 
-        while not done:
+        while True:
             frame_idx += 1
             agent.frame_idx = frame_idx
 
-            action = agent.act(state)
-            next_state, reward, done, info = env.step(action)
-            agent.push(state, action, reward, next_state, done)
+            action = agent.act(obs)
+            next_obs, env_r, done, info = env.step(action)
+
+            # 检查是否 truncated
+            truncated = info.get('TimeLimit.truncated', False)
+            # 真正的 terminal
+            done_flag = done and not truncated
+
+            # 自定义 reward
+            custom_r = env_r
+
+            # 回头 / 停留 penalty
+            x_pos = info.get('x_pos')
+            if x_pos is not None:
+                if prev_x is None:
+                    prev_x = x_pos
+                dx = x_pos - prev_x
+                if dx < 0:
+                    custom_r += BACKWARD_PENALTY
+                elif dx == 0:
+                    custom_r += STAY_PENALTY
+                prev_x = x_pos
+
+            # 死亡 penalty：life 减少
+            life = info.get('life')
+            if prev_life is None:
+                prev_life = life
+            elif life < prev_life:
+                custom_r += DEATH_PENALTY
+            prev_life = life
+
+            # 存 buffer／learn，用 done_flag
+            agent.push(obs, action, custom_r, next_obs, done_flag)
             agent.learn()
 
-            state = next_state
-            ep_reward += reward
+            obs = next_obs
+            ep_reward     += custom_r
+            ep_env_reward += env_r
 
+            if done:
+                break
+
+        # 本集记录
         reward_history.append(ep_reward)
+        env_reward_history.append(ep_env_reward)
         stage_history.append(env.unwrapped._stage)
 
-        # 每 100 集记录一次
+        status = "TRUNCATED" if truncated else "TERMINAL"
+        status_history.append(status)
+        # print(f"[Episode {ep:5d}] , "
+        #       f"Reward: {ep_reward:6.2f}  EnvR: {ep_env_reward:6.2f}  "
+        #       f"Stage: {env.unwrapped._stage}  Status: {status}")
+        
+        # 每 100 集：统计、保存、画图、记录耗时
         if ep % 100 == 0:
-            # 计算耗时
-            chunk_end   = time.time()
-            chunk_time  = chunk_end - chunk_start
-            durations.append(chunk_time)
+            chunk_end = time.time()
+            dur = chunk_end - chunk_start
+            durations.append(dur)
             chunk_start = time.time()
 
-            # 计算平均 reward & stage
-            last100_r = reward_history[-100:]
-            last100_s = stage_history[-100:]
-            avg_r = np.mean(last100_r)
-            avg_s = np.mean(last100_s)
+            # 窗口平均
+            w_env    = env_reward_history[-100:]
+            w_cust   = reward_history[-100:]
+            w_stage  = stage_history[-100:]
+            avg_env  = np.mean(w_env)
+            avg_cust = np.mean(w_cust)
+            avg_stg  = np.mean(w_stage)
 
-            print(f"[Episode {ep:5d}]  Avg Reward: {avg_r:6.2f}  "
-                  f"Avg Stage: {avg_s:4.1f}  Frames: {frame_idx}  "
-                  f"Time for last 100 eps: {chunk_time/60:.2f} min")
+            print(f"[Batch {ep//100:3d} | Ep {ep:5d}] "
+                  f"AvgEnvR: {avg_env:6.2f}  AvgCustR: {avg_cust:6.2f}  "
+                  f"AvgStg: {avg_stg:4.1f}  Frames: {frame_idx}  "
+                  f"Time(100eps): {dur/60:.2f} min"
+                  f" Truncated number: {status_history[-100:].count('TRUNCATED')}")
 
-            # 保存 checkpoint
             torch.save({
-                'model':      agent.online.state_dict(),
-                'optimizer':  agent.opt.state_dict(),
-                'frame_idx':  frame_idx,
-                'episode':    ep
+                'model':     agent.online.state_dict(),
+                'optimizer': agent.opt.state_dict(),
+                'frame_idx': frame_idx,
+                'episode':   ep
             }, checkpoint_path)
 
-            # 绘制到目前为止每 100 集的平均 reward 曲线
-            num_chunks = len(reward_history) // 100
-            episodes   = [i*100 for i in range(1, num_chunks+1)]
-            avg_rewards = [
-                np.mean(reward_history[(i-1)*100:i*100])
-                for i in range(1, num_chunks+1)
-            ]
-            plt.figure(figsize=(6,4))
-            plt.plot(episodes, avg_rewards, marker='o')
-            plt.xlabel('Episode')
+            # 画对比图
+            chunks = len(reward_history) // 100
+            xs     = [i*100 for i in range(1, chunks+1)]
+            avg_envs  = [np.mean(env_reward_history[(i-1)*100:i*100]) for i in range(1, chunks+1)]
+            avg_custs = [np.mean(reward_history[(i-1)*100:i*100])          for i in range(1, chunks+1)]
+
+            plt.figure(figsize=(8,4))
+            plt.plot(xs, avg_envs,  marker='o', label='Env Reward')
+            plt.plot(xs, avg_custs, marker='x', label='Custom Reward')
+            plt.xlabel('Episodes')
             plt.ylabel('Avg Reward per 100 eps')
-            plt.title('Reward History')
+            plt.title('Reward Comparison')
+            plt.legend()
             plt.grid(True)
             plt.savefig(os.path.join(
                 os.path.dirname(checkpoint_path),
-                'reward_history.png'
-            ))
+                'reward_comparison.png'))
             plt.close()
 
     print("Training complete.")
-    # 可选：返回 durations 以供进一步分析
-    return reward_history, stage_history, durations
+    return reward_history, env_reward_history, stage_history, durations
     
 if __name__ == "__main__":
     train(num_episodes=100000)
