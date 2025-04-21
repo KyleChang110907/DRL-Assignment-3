@@ -100,8 +100,10 @@ from gym_super_mario_bros.actions import COMPLEX_MOVEMENT
 
 # 请确保下面这两个类已经和训练时完全一样地定义过，或者从你的训练代码里 import 进来
 from training.rainbow import DuelingCNN
+model_path = 'checkpoints/rainbow_5/rainbow_dqn_mario.pth'
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 class Agent:
-    def __init__(self, model_path: str, device: str = 'cpu'):
+    def __init__(self):
         # 1. 设备 & 网络
         self.device = torch.device(device)
         # 假设训练时网络接收 4 帧、输出 len(COMPLEX_MOVEMENT) 个动作
