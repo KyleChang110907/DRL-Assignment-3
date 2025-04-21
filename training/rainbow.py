@@ -363,7 +363,7 @@ import time
 # 6. Training Loop (按 episode)
 # -----------------------------
 def train(num_episodes,
-          checkpoint_path='checkpoints/rainbow_5/rainbow_dqn_mario.pth'):
+          checkpoint_path='checkpoints/rainbow_t/rainbow_dqn_mario.pth'):
     """
     考虑 truncated、回头、停留、死亡罚分的训练函数。
     """
@@ -463,9 +463,9 @@ def train(num_episodes,
 
         status = "TRUNCATED" if truncated else "TERMINAL"
         status_history.append(status)
-        # print(f"[Episode {ep:5d}] , "
-        #       f"Reward: {ep_reward:6.2f}  EnvR: {ep_env_reward:6.2f}  "
-        #       f"Stage: {env.unwrapped._stage}  Status: {status}")
+        print(f"[Episode {ep:5d}] , "
+              f"Reward: {ep_reward:6.2f}  EnvR: {ep_env_reward:6.2f}  "
+              f"Stage: {env.unwrapped._stage}  Status: {status}")
         
         # 每 100 集：统计、保存、画图、记录耗时
         if ep % 100 == 0:

@@ -1,5 +1,6 @@
 from training.rainbow import make_env
-from student_agent import Agent
+from student_agent_w_wrapper import Agent
+import time 
 
 env = make_env()
 agent = Agent()
@@ -15,6 +16,8 @@ for _ in range(10):
         obs, r, done, info = env.step(action)
         total_reward += r
 
+    #     env.render()  # Uncomment to visualize the environment
+    #     time.sleep(0.02)  # Uncomment to control rendering speed
     print("Total reward:", total_reward)
     rewards.append(total_reward)
 
