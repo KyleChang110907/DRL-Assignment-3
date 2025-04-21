@@ -23,7 +23,7 @@ from training.rainbow2 import DuelingCNN
 # -----------------------------
 # Inference‑only Agent
 # -----------------------------
-class InferenceAgent:
+class Agent:
     def __init__(self):
         # same obs shape as training
         self.obs_c, self.h, self.w = 4, 84, 90
@@ -71,7 +71,7 @@ def run_inference(num_episodes=5, render=True):
     env = JoypadSpace(env, COMPLEX_MOVEMENT)
     env = gym.wrappers.TimeLimit(env, max_episode_steps=MAX_EPISODE_STEPS)
 
-    agent = InferenceAgent()
+    agent = Agent()
 
     for ep in range(1, num_episodes + 1):
         obs   = env.reset()
