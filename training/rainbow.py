@@ -37,14 +37,15 @@ PER_EPSILON             = 0.1
 N_STEP                  = 5
 NOISY_SIGMA_INIT        = 2.5
 # new hyperparameters
-BACKWARD_PENALTY      = -2
-STAY_PENALTY         = -1
-DEATH_PENALTY        = -50
+BACKWARD_PENALTY      = 0 #-1
+STAY_PENALTY         = 0 #-0.2
+DEATH_PENALTY        = -100 #-50
+
 
 MAX_FRAMES              = 44800000    # total training frames
 
 # 最大步数，超过便 truncated
-MAX_EPISODE_STEPS = 5000
+MAX_EPISODE_STEPS = 3000
 
 # -----------------------------
 # 1. Environment Wrappers
@@ -362,7 +363,7 @@ import time
 # 6. Training Loop (按 episode)
 # -----------------------------
 def train(num_episodes,
-          checkpoint_path='checkpoints/rainbow_4/rainbow_dqn_mario.pth'):
+          checkpoint_path='checkpoints/rainbow_5/rainbow_dqn_mario.pth'):
     """
     考虑 truncated、回头、停留、死亡罚分的训练函数。
     """
@@ -384,6 +385,16 @@ def train(num_episodes,
         frame_idx = ckpt.get('frame_idx', 0)
         start_ep  = ckpt.get('episode', 0) + 1
         print(f"Resuming from episode {start_ep}, frame {frame_idx}")
+
+    while len(agent.buffer.buffer) < BATCH_SIZE:
+        state = env.reset()
+        for _ in range(N_STEP):  # 随机推 N_STEP 步也行
+            act = env.action_space.sample()
+            next_s, r, done, info = env.step(act)
+            agent.push(state, act, r, next_s, done)
+            state = next_s
+            if done:
+                break
 
     reward_history     = []
     env_reward_history = []
@@ -502,6 +513,23 @@ def train(num_episodes,
                 os.path.dirname(checkpoint_path),
                 'reward_comparison.png'))
             plt.close()
+
+            # 5) 新增：10 次 inference 评估
+            eval_env = make_env()
+            eval_rewards = []
+            for _ in range(10):
+                e_obs = eval_env.reset()
+                done = False
+                total = 0.0
+                step = 0
+                while not done and step < 2000:
+                    a = agent.act(e_obs)
+                    e_obs, r, done, _ = eval_env.step(a)
+                    total += r
+                    step += 1
+                eval_rewards.append(total)
+            eval_env.close()
+            print(f"    → Eval avg over 10 eps: {np.mean(eval_rewards):.2f}")
 
     print("Training complete.")
     return reward_history, env_reward_history, stage_history, durations

@@ -1,71 +1,34 @@
-# inference_agent.py
-
 import torch
-import gym
-import numpy as np
-from collections import deque
-from torchvision import transforms as T
+import torch.nn.functional as F
+from training.rainbow import make_env, DuelingCNN  # 假設 DuelingCNN 與 make_env 在同一個檔案或同個套件
 
-from training.rainbow import DuelingCNN
+CHECKPOINT_PATH = 'checkpoints/rainbow_5/rainbow_dqn_mario.pth'
 
-CHECKPOINT_PATH   = 'checkpoints/rainbow_3/rainbow_dqn_mario.pth'
-N_STACKED_FRAMES  = 4
-N_ACTIONS         = 12
-DEVICE            = torch.device("cpu")
-TEMPERATURE       = 2.0   # Softmax 温度，<1 更加贪心，>1 更加随机
-
-class Agent(object):
-    """
-    Stochastic Inference Agent：使用 NoisyNet 噪声和 softmax sampling
-    __init__ 与 act 签名保持不变。
-    """
+class Agent:
     def __init__(self):
-        # 1. 建网络并加载权重
-        self.net = DuelingCNN(N_STACKED_FRAMES, N_ACTIONS).to(DEVICE)
-        ckpt = torch.load(CHECKPOINT_PATH, map_location=DEVICE)
-        state_dict = ckpt['model'] if isinstance(ckpt, dict) and 'model' in ckpt else ckpt
-        self.net.load_state_dict(state_dict)
-
-        # 2. **保持训练模式**，让 NoisyLinear 在 forward 时注入噪声
-        self.net.train()
-
-        # 3. 预处理流水线
-        self.transform = T.Compose([
-            T.ToPILImage(),
-            T.Grayscale(),
-            T.Resize((84, 90)),
-            T.ToTensor()
-        ])
-
-        # 4. 帧缓冲
-        self.frames = deque(maxlen=N_STACKED_FRAMES)
-
-        # 5. action_space
-        self.action_space = gym.spaces.Discrete(N_ACTIONS)
+        # 1. 設定裝置
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # 2. 用暫時環境取得 obs_shape 與 action 數量
+        env = make_env()
+        obs_shape = env.observation_space.shape  # e.g. (4,84,90)
+        n_actions = env.action_space.n
+        env.close()
+        # 3. 初始化網路並載入權重
+        self.model = DuelingCNN(obs_shape[0], n_actions).to(self.device)
+        ckpt = torch.load(CHECKPOINT_PATH, map_location=self.device)
+        # 如果你在存檔時將模型 state_dict 包在 'model' key 中，否則直接 load ckpt
+        self.model.load_state_dict(ckpt.get('model', ckpt))
+        self.model.eval()
 
     def act(self, observation):
-        # 1) 预处理到 [1,84,90]
-        if isinstance(observation, np.ndarray):
-            obs_t = self.transform(observation)
-        elif torch.is_tensor(observation):
-            obs_t = observation.float().squeeze(0)
-        else:
-            raise TypeError(f"Unsupported obs: {type(observation)}")
-
-        # 2) 堆帧
-        if not self.frames:
-            for _ in range(N_STACKED_FRAMES):
-                self.frames.append(obs_t)
-        else:
-            self.frames.append(obs_t)
-        state = torch.cat(list(self.frames), dim=0).unsqueeze(0).to(DEVICE)  # [1,4,84,90]
-
-        # 3) 重置噪声并前向
-        self.net.reset_noise()
+        """
+        根據原始 observation 回傳一個 action。
+        observation: numpy array, shape 與訓練時相同 (例如 (4,84,90))
+        """
+        # 1. 轉 tensor 並送到裝置
+        state = torch.tensor(observation, dtype=torch.float32).unsqueeze(0).to(self.device)
+        # 2. 前向推論
         with torch.no_grad():
-            q_vals = self.net(state).squeeze(0)  # [N_ACTIONS]
-
-        # 4) Softmax sampling
-        probs = torch.softmax(q_vals / TEMPERATURE, dim=0)
-        action = torch.multinomial(probs, num_samples=1).item()
-        return action
+            q_vals = self.model(state)
+        # 3. 選取最大 Q-value 的動作
+        return int(q_vals.argmax(dim=1).item())
