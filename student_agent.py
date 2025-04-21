@@ -83,6 +83,7 @@ class Agent:
         回傳 int 動作。
         """
         # 1) 確保 contiguous 以消除負 strides
+        print(f"observation shape: {observation.shape}, dtype: {observation.dtype}")
         obs = np.ascontiguousarray(observation)
 
         # 2) 判斷是不是已經是 (4,84,90) 的 preprocessed stack
