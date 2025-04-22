@@ -5,14 +5,19 @@ import numpy as np
 from collections import deque
 from torchvision import transforms as T
 from PIL import Image
+import cv2
+import time
 from gym_super_mario_bros.actions import COMPLEX_MOVEMENT
 
 # 请确保下面这两个类已经和训练时完全一样地定义过，或者从你的训练代码里 import 进来
 from training.rainbow import DuelingCNN
+from training.rainbow2_sf import SKIP_FRAMES
 
 class InferenceAgent:
     def __init__(self, model_path: str, device: str = 'cpu'):
         # 1. 设备 & 网络
+        self.obs_c, self.h, self.w = 4, 84, 90
+        self.n_actions = len(COMPLEX_MOVEMENT)
         self.device = torch.device(device)
         # 假设训练时网络接收 4 帧、输出 len(COMPLEX_MOVEMENT) 个动作
         self.net = DuelingCNN(in_channels=4, n_actions=len(COMPLEX_MOVEMENT))
@@ -31,7 +36,22 @@ class InferenceAgent:
 
         # 3. 帧堆叠队列
         self.frames = deque(maxlen=4)
+        self.last_state = None
 
+        # **新增：跳帧管理**
+        self.skip_count = 0
+        self.last_action = 0
+
+        # 用来检测 reset
+        self.first_raw       = None
+        self.reset_threshold = 5.0   # 平均像素差阈值       
+    def _process(self, raw):
+        gray = cv2.cvtColor(raw, cv2.COLOR_RGB2GRAY)
+        resized = cv2.resize(gray, (self.w, self.h), interpolation=cv2.INTER_AREA)
+        img = resized.astype(np.float32)
+        self.frames.append(img)
+        return np.stack(self.frames, axis=0)
+    
     def act(self, raw_obs: np.ndarray) -> int:
         """
         输入:
@@ -39,28 +59,44 @@ class InferenceAgent:
         返回:
           action (int)
         """
-        # —— 1. 预处理当前帧 —— 
-        # transform -> tensor [1,84,90]
-        t = self.transform(raw_obs)  
-        # 转成 numpy [84,90]
-        f = t.squeeze(0).numpy()      
+        # —— 1. 首次调用时记录第一帧
+        if self.first_raw is None:
+            self.first_raw = raw_obs.copy()
 
-        # —— 2. 如果是新一集, 先把队列填满同一帧 —— 
+        # —— 2. 检测是否为 reset（done）
+        # —— 2. 如果当前帧和第一帧【完全相同】，就认为是刚 reset
+        if np.array_equal(raw_obs, self.first_raw):
+            self.frames.clear()
+            self.skip_count = 0
+            self.last_action = 0
+            current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+            # print(f"{current_time} | Environment reset detected.")
+
+
+        # 先用新帧更新 frame‑stack
         if len(self.frames) == 0:
-            for _ in range(4):
-                self.frames.append(f)
-        else:
-            self.frames.append(f)
+            gray = cv2.cvtColor(raw_obs, cv2.COLOR_RGB2GRAY)
+            resized = cv2.resize(gray, (self.w, self.h), interpolation=cv2.INTER_AREA)
+            img = resized.astype(np.float32)
+            for _ in range(self.obs_c):
+                self.frames.append(img)
+        state = self._process(raw_obs)
+        self.last_state = state
 
-        # —— 3. 堆成(4×84×90) 送入网络 —— 
-        state = np.stack(self.frames, axis=0)           # shape = (4,84,90)
-        st_t  = torch.from_numpy(state).unsqueeze(0)    # shape = (1,4,84,90)
-        st_t  = st_t.to(self.device, dtype=torch.float32)
+        # 如果现在还在跳帧期，就直接返回上次的动作
+        if self.skip_count > 0:
+            self.skip_count -= 1
+            return self.last_action
 
-        # —— 4. 推理并选动作 —— 
+        # 否则真正跑网络选新动作
+        tensor = torch.from_numpy(state).unsqueeze(0).to(self.device)
         with torch.no_grad():
-            q = self.net(st_t)           # shape = (1, n_actions)
-            action = int(q.argmax(1).item())
+            q = self.net(tensor)
+        action = int(q.argmax(1).item())
+
+        # 记录，并重置跳帧计数
+        self.last_action = action
+        self.skip_count = SKIP_FRAMES - 1
         return action
 
 if __name__ == "__main__":
@@ -75,7 +111,7 @@ if __name__ == "__main__":
     env   = TimeLimit(env, max_episode_steps=MAX_EPISODE_STEPS)
 
     # 2. 实例化推理 Agent（载入你训练好的 checkpoint）
-    agent = InferenceAgent('checkpoints/rainbow_5/rainbow_dqn_mario.pth', device='cpu')
+    agent = InferenceAgent('checkpoints/rainbow_23/rainbow_mario.pth', device='cpu')
 
     # 3. 跑十集
     rewards = []
@@ -92,7 +128,8 @@ if __name__ == "__main__":
 
             obs, r, done, info = env.step(a)
             total += r
-
+            env.render()
+            time.sleep(0.01)
         print(f"Episode {ep+1:2d} → reward = {total:6.1f}")
         rewards.append(total)
 

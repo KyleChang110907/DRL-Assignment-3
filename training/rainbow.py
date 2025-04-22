@@ -40,6 +40,7 @@ NOISY_SIGMA_INIT        = 2.5
 BACKWARD_PENALTY      = 0 #-1
 STAY_PENALTY         = 0 #-0.2
 DEATH_PENALTY        = -100 #-50
+SKIP_FRAMES         = 4
 
 
 MAX_FRAMES              = 44800000    # total training frames
@@ -356,6 +357,92 @@ class Agent:
     def push(self, s,a,r,s2,d):
         self.buffer.add(s,a,r,s2,d)
 
+# class Agent:
+#     def __init__(self, obs_shape, n_actions, device):
+#         self.device    = device
+#         self.n_actions = n_actions
+
+#         # networks
+#         self.online = DuelingCNN(obs_shape[0], n_actions).to(device)
+#         self.target = DuelingCNN(obs_shape[0], n_actions).to(device)
+#         self.target.load_state_dict(self.online.state_dict())
+#         self.target.eval()
+
+#         self.opt = optim.Adam(
+#             self.online.parameters(),
+#             lr=LEARNING_RATE, eps=ADAM_EPS
+#         )
+
+#         self.buffer = PrioritizedReplayBuffer(
+#             capacity=BUFFER_CAPACITY,
+#             alpha=PER_ALPHA,
+#             beta_start=PER_BETA_START,
+#             beta_frames=PER_BETA_FRAMES,
+#             n_step=N_STEP,
+#             gamma=GAMMA
+#         )
+#         self.gamma      = GAMMA
+#         self.batch_size = BATCH_SIZE
+#         self.frame_idx  = 0
+#         self.update_freq= COPY_NETWORK_FREQ
+
+#         # --- 新增：跳帧管理状态 ---
+#         self.skip_count  = 0
+#         self.last_action = 0
+
+#     def act(self, state):
+#         # 如果还在跳帧期，直接复用上一帧动作
+#         if self.skip_count > 0:
+#             self.skip_count -= 1
+#             return self.last_action
+
+#         # 否则真正调用网络
+#         state = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
+#         with torch.no_grad():
+#             q = self.online(state)
+#         action = int(q.argmax(1).item())
+
+#         # 记录，并重置跳帧计数
+#         self.last_action = action
+#         self.skip_count  = SKIP_FRAMES - 1
+#         return action
+
+#     def learn(self):
+#         if self.frame_idx < self.batch_size:
+#             return
+#         s,a,r,s2,d,w,idxs = self.buffer.sample(self.batch_size, self.frame_idx)
+
+#         s   = torch.tensor(s,  dtype=torch.float32).to(self.device)
+#         a   = torch.tensor(a).to(self.device)
+#         r   = torch.tensor(r,  dtype=torch.float32).to(self.device)
+#         s2  = torch.tensor(s2, dtype=torch.float32).to(self.device)
+#         d   = torch.tensor(d,  dtype=torch.float32).to(self.device)
+#         w   = torch.tensor(w,  dtype=torch.float32).to(self.device)
+
+#         # Double DQN target
+#         q_pred = self.online(s).gather(1, a.unsqueeze(1)).squeeze(1)
+#         a_next = self.online(s2).argmax(1)
+#         q_next = self.target(s2).gather(1, a_next.unsqueeze(1)).squeeze(1)
+#         q_tar  = r + (self.gamma**N_STEP) * q_next * (1 - d)
+
+#         td   = q_pred - q_tar.detach()
+#         loss = (F.smooth_l1_loss(q_pred, q_tar.detach(), reduction='none') * w).mean()
+
+#         self.opt.zero_grad()
+#         loss.backward()
+#         self.opt.step()
+
+#         self.online.reset_noise()
+#         self.target.reset_noise()
+
+#         self.buffer.update_priorities(idxs, td.detach().cpu().numpy())
+
+#         if self.frame_idx % self.update_freq == 0:
+#             self.target.load_state_dict(self.online.state_dict())
+
+#     def push(self, s, a, r, s2, d):
+#         self.buffer.add(s, a, r, s2, d)
+
 import matplotlib.pyplot as plt
 import time
 
@@ -363,7 +450,7 @@ import time
 # 6. Training Loop (按 episode)
 # -----------------------------
 def train(num_episodes,
-          checkpoint_path='checkpoints/rainbow_t/rainbow_dqn_mario.pth'):
+          checkpoint_path='checkpoints/rainbow_11/rainbow_dqn_mario.pth'):
     """
     考虑 truncated、回头、停留、死亡罚分的训练函数。
     """
@@ -463,9 +550,9 @@ def train(num_episodes,
 
         status = "TRUNCATED" if truncated else "TERMINAL"
         status_history.append(status)
-        print(f"[Episode {ep:5d}] , "
-              f"Reward: {ep_reward:6.2f}  EnvR: {ep_env_reward:6.2f}  "
-              f"Stage: {env.unwrapped._stage}  Status: {status}")
+        # print(f"[Episode {ep:5d}] , "
+        #       f"Reward: {ep_reward:6.2f}  EnvR: {ep_env_reward:6.2f}  "
+        #       f"Stage: {env.unwrapped._stage}  Status: {status}")
         
         # 每 100 集：统计、保存、画图、记录耗时
         if ep % 100 == 0:

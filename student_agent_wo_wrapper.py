@@ -16,9 +16,9 @@ from collections import deque
 # Hyperparameters / paths
 # -----------------------------
 MAX_EPISODE_STEPS = 2000
-CHECKPOINT_PATH   = 'checkpoints/rainbow_21/rainbow_mario.pth'
+CHECKPOINT_PATH   = 'checkpoints/rainbow_23/rainbow_mario.pth'
 
-from training.rainbow2 import DuelingCNN
+from training.rainbow2_sf import DuelingCNN, SKIP_FRAMES
 
 # -----------------------------
 # Inference‑only Agent
@@ -40,6 +40,14 @@ class InferenceAgent:
         self.frames = deque(maxlen=self.obs_c)
         self.last_state = None
 
+        # **新增：跳帧管理**
+        self.skip_count = 0
+        self.last_action = 0
+
+        # 用来检测 reset
+        self.first_raw       = None
+        self.reset_threshold = 5.0   # 平均像素差阈值
+
     def _process(self, raw):
         gray    = cv2.cvtColor(raw, cv2.COLOR_RGB2GRAY)
         resized = cv2.resize(gray, (self.w, self.h), interpolation=cv2.INTER_AREA)
@@ -48,20 +56,45 @@ class InferenceAgent:
         return np.stack(self.frames, axis=0)
 
     def act(self, raw):
-        # on first call (or after clear), fill deque with identical frames
+        # —— 1. 首次调用时记录第一帧
+        if self.first_raw is None:
+            self.first_raw = raw.copy()
+
+        # —— 2. 检测是否为 reset（done）
+        # —— 2. 如果当前帧和第一帧【完全相同】，就认为是刚 reset
+        if np.array_equal(raw, self.first_raw):
+            self.frames.clear()
+            self.skip_count = 0
+            self.last_action = 0
+            # current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+            # print(f"{current_time} | Environment reset detected.")
+
+
+        # 先用新帧更新 frame‑stack
         if len(self.frames) == 0:
-            gray    = cv2.cvtColor(raw, cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor(raw, cv2.COLOR_RGB2GRAY)
             resized = cv2.resize(gray, (self.w, self.h), interpolation=cv2.INTER_AREA)
-            img     = resized.astype(np.float32)
+            img = resized.astype(np.float32)
             for _ in range(self.obs_c):
                 self.frames.append(img)
-
         state = self._process(raw)
         self.last_state = state
+
+        # 如果现在还在跳帧期，就直接返回上次的动作
+        if self.skip_count > 0:
+            self.skip_count -= 1
+            return self.last_action
+
+        # 否则真正跑网络选新动作
         tensor = torch.from_numpy(state).unsqueeze(0).to(self.device)
         with torch.no_grad():
             q = self.model(tensor)
-        return int(q.argmax(1).item())
+        action = int(q.argmax(1).item())
+
+        # 记录，并重置跳帧计数
+        self.last_action = action
+        self.skip_count = SKIP_FRAMES - 1
+        return action
 
 # -----------------------------
 # Inference Loop

@@ -10,97 +10,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from collections import deque
-
-# -----------------------------
-# Hyperparameters / paths
-# -----------------------------
-MAX_EPISODE_STEPS = 2000
-CHECKPOINT_PATH   = 'checkpoints/rainbow_21/rainbow_mario.pth'
-
-from training.rainbow2 import DuelingCNN
-
-# -----------------------------
-# Inference‑only Agent
-# -----------------------------
-class Agent:
-    def __init__(self):
-        # same obs shape as training
-        self.obs_c, self.h, self.w = 4, 84, 90
-        self.n_actions = len(COMPLEX_MOVEMENT)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        # load network
-        self.model = DuelingCNN(self.obs_c, self.n_actions).to(self.device)
-        checkpoint = torch.load(CHECKPOINT_PATH, map_location=self.device)
-        self.model.load_state_dict(checkpoint['model'])
-        self.model.eval()  # deterministic, no noise
-
-        # frame buffer
-        self.frames = deque(maxlen=self.obs_c)
-        self.last_state = None
-
-    def _process(self, raw):
-        gray    = cv2.cvtColor(raw, cv2.COLOR_RGB2GRAY)
-        resized = cv2.resize(gray, (self.w, self.h), interpolation=cv2.INTER_AREA)
-        img     = resized.astype(np.float32)
-        self.frames.append(img)
-        return np.stack(self.frames, axis=0)
-
-    def act(self, raw):
-        # on first call (or after clear), fill deque with identical frames
-        if len(self.frames) == 0:
-            gray    = cv2.cvtColor(raw, cv2.COLOR_RGB2GRAY)
-            resized = cv2.resize(gray, (self.w, self.h), interpolation=cv2.INTER_AREA)
-            img     = resized.astype(np.float32)
-            for _ in range(self.obs_c):
-                self.frames.append(img)
-
-        state = self._process(raw)
-        self.last_state = state
-        tensor = torch.from_numpy(state).unsqueeze(0).to(self.device)
-        with torch.no_grad():
-            q = self.model(tensor)
-        return int(q.argmax(1).item())
-
-# # -----------------------------
-# # Inference Loop
-# # -----------------------------
-# def run_inference(num_episodes=5, render=True):
-#     env = gym_super_mario_bros.make('SuperMarioBros-v0')
-#     env = JoypadSpace(env, COMPLEX_MOVEMENT)
-#     env = gym.wrappers.TimeLimit(env, max_episode_steps=MAX_EPISODE_STEPS)
-
-#     agent = Agent()
-
-#     for ep in range(1, num_episodes + 1):
-#         obs   = env.reset()
-#         done  = False
-#         total = 0.0
-
-#         while not done:
-#             action = agent.act(obs)
-#             obs, reward, done, info = env.step(action)
-#             total += reward
-#             if render:
-#                 env.render()
-
-#         print(f"Episode {ep:>2d}  Raw Reward: {total:.2f}")
-#     env.close()
-
-# if __name__ == '__main__':
-#     run_inference(num_episodes=10, render=True)
-
-import torch
-import numpy as np
-from collections import deque
 from torchvision import transforms as T
-from PIL import Image
-from gym_super_mario_bros.actions import COMPLEX_MOVEMENT
+from collections import deque
 
-# 请确保下面这两个类已经和训练时完全一样地定义过，或者从你的训练代码里 import 进来
-from training.rainbow import DuelingCNN
-model_path = 'checkpoints/rainbow_5/rainbow_dqn_mario.pth'
+from training.rainbow import DuelingCNN, COMPLEX_MOVEMENT, make_env, SKIP_FRAMES
+model_path = 'checkpoints/rainbow_11/rainbow_dqn_mario.pth'
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 class Agent:
     def __init__(self):
@@ -124,6 +38,19 @@ class Agent:
         # 3. 帧堆叠队列
         self.frames = deque(maxlen=4)
 
+        # 4. 自訂的環境
+        self.env = make_env()
+        self.state = self.env.reset()
+
+        # 5. skip_frames
+        self.skip_count = 0
+        self.last_action = 0
+
+        # 6. 用來檢測 reset
+        self.first_raw = None
+        self.done = False
+
+
     def act(self, raw_obs: np.ndarray) -> int:
         """
         输入:
@@ -133,6 +60,17 @@ class Agent:
         """
         # —— 1. 预处理当前帧 —— 
         # transform -> tensor [1,84,90]
+        if self.first_raw is None:
+            self.first_raw = raw_obs.copy()
+        
+        if np.array_equal(raw_obs, self.first_raw):
+            print('done while same as first frame')
+            self.frames.clear()
+            self.skip_count = 0
+            self.last_action = 0
+            self.state = self.env.reset()
+            self.done = False
+
         t = self.transform(raw_obs)  
         # 转成 numpy [84,90]
         f = t.squeeze(0).numpy()      
@@ -144,13 +82,33 @@ class Agent:
         else:
             self.frames.append(f)
 
-        # —— 3. 堆成(4×84×90) 送入网络 —— 
-        state = np.stack(self.frames, axis=0)           # shape = (4,84,90)
-        st_t  = torch.from_numpy(state).unsqueeze(0)    # shape = (1,4,84,90)
-        st_t  = st_t.to(self.device, dtype=torch.float32)
+        if self.done and self.skip_count == 0:
+            print('done')
+            self.frames.clear()
+            self.skip_count = 0
+            self.last_action = 0
+            self.state = self.env.reset()
+            self.done = False
 
-        # —— 4. 推理并选动作 —— 
+        elif self.done and self.skip_count > 0:
+            self.skip_count -= 1
+            return self.last_action
+        
+        if self.skip_count > 0:
+            self.skip_count -= 1
+            return self.last_action
+        
+        state = torch.tensor(self.state, dtype=torch.float32).unsqueeze(0).to(self.device)
         with torch.no_grad():
-            q = self.net(st_t)           # shape = (1, n_actions)
+            q = self.net(state)
             action = int(q.argmax(1).item())
+            self.last_action = action
+            self.skip_count = 0
+
+        self.state, env_r, self.done, info = self.env.step(self.last_action)
+        self.skip_count = self.state.shape[0] - 1
+
+        if self.done:
+            print(f'done within {self.skip_count} frames')
+
         return action
