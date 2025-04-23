@@ -53,39 +53,39 @@ class InferenceAgent:
         """
         # —— 1. 预处理当前帧 —— 
         # transform -> tensor [1,84,90]
-        if self.first_raw is None:
-            self.first_raw = raw_obs.copy()
+        # if self.first_raw is None:
+        #     self.first_raw = raw_obs.copy()
         
-        if np.array_equal(raw_obs, self.first_raw):
-            print('done while same as first frame')
-            self.frames.clear()
-            self.skip_count = 0
-            self.last_action = 0
-            self.state = self.env.reset()
-            self.done = False
+        # if np.array_equal(raw_obs, self.first_raw):
+        #     print('done while same as first frame')
+        #     self.frames.clear()
+        #     self.skip_count = 0
+        #     self.last_action = 0
+        #     self.state = self.env.reset()
+        #     self.done = False
 
-        t = self.transform(raw_obs)  
-        # 转成 numpy [84,90]
-        f = t.squeeze(0).numpy()      
+        # t = self.transform(raw_obs)  
+        # # 转成 numpy [84,90]
+        # f = t.squeeze(0).numpy()      
 
-        # —— 2. 如果是新一集, 先把队列填满同一帧 —— 
-        if len(self.frames) == 0:
-            for _ in range(4):
-                self.frames.append(f)
-        else:
-            self.frames.append(f)
+        # # —— 2. 如果是新一集, 先把队列填满同一帧 —— 
+        # if len(self.frames) == 0:
+        #     for _ in range(4):
+        #         self.frames.append(f)
+        # else:
+        #     self.frames.append(f)
 
-        if self.done and self.skip_count == 0:
-            print('done')
-            self.frames.clear()
-            self.skip_count = 0
-            self.last_action = 0
-            self.state = self.env.reset()
-            self.done = False
+        # if self.done and self.skip_count == 0:
+        #     print('done')
+        #     self.frames.clear()
+        #     self.skip_count = 0
+        #     self.last_action = 0
+        #     self.state = self.env.reset()
+        #     self.done = False
 
-        elif self.done and self.skip_count > 0:
-            self.skip_count -= 1
-            return self.last_action
+        # elif self.done and self.skip_count > 0:
+        #     self.skip_count -= 1
+        #     return self.last_action
         
         if self.skip_count > 0:
             self.skip_count -= 1
@@ -101,7 +101,7 @@ class InferenceAgent:
         self.state, env_r, self.done, info = self.env.step(self.last_action)
         self.skip_count = self.state.shape[0] - 1
 
-        if self.done:
-            print(f'done within {self.skip_count} frames')
+        # if self.done:
+        #     print(f'done within {self.skip_count} frames')
 
         return action

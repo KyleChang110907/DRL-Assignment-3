@@ -28,13 +28,14 @@ if __name__ == "__main__":
     # 3. 跑十集
     rewards = []
     for ep in range(10):
+        agent = InferenceAgent('checkpoints/rainbow_11/rainbow_dqn_mario.pth', device='cpu')
         obs   = env.reset()   # raw RGB frame, shape=(240,256,3)
         done  = False
         total = 0
         steps = 0
 
         # 注意：第一次调用 act() 时内部队列会自动填满；不用额外清零
-        while not done and steps < 2000:
+        while not done and steps < 3000:
             # 只用原图调用 act，内部自动做所有 wrapper 操作
             a, steps = agent.act(obs), steps + 1
 
