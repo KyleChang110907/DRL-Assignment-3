@@ -40,8 +40,9 @@ if __name__ == "__main__":
 
             obs, r, done, info = env.step(a)
             total += r
+            # print(f"Step {steps:4d}  Action {a:2d}  Reward {r:.2f}  Total {total:.2f}")
             env.render()
-            time.sleep(0.01)
+            # time.sleep(0.1)
         print(f"Episode {ep+1:2d} → reward = {total:6.1f}")
         rewards.append(total)
 

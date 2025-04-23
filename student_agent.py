@@ -71,16 +71,16 @@ class Agent:
             self.state = self.env.reset()
             self.done = False
 
-        t = self.transform(raw_obs)  
-        # 转成 numpy [84,90]
-        f = t.squeeze(0).numpy()      
+        # t = self.transform(raw_obs)  
+        # # 转成 numpy [84,90]
+        # f = t.squeeze(0).numpy()      
 
-        # —— 2. 如果是新一集, 先把队列填满同一帧 —— 
-        if len(self.frames) == 0:
-            for _ in range(4):
-                self.frames.append(f)
-        else:
-            self.frames.append(f)
+        # # —— 2. 如果是新一集, 先把队列填满同一帧 —— 
+        # if len(self.frames) == 0:
+        #     for _ in range(4):
+        #         self.frames.append(f)
+        # else:
+        #     self.frames.append(f)
 
         if self.done and self.skip_count == 0:
             print('done')
