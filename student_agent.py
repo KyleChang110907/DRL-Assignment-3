@@ -14,7 +14,7 @@ from torchvision import transforms as T
 from collections import deque
 
 from training.rainbow import DuelingCNN, COMPLEX_MOVEMENT, make_env, SKIP_FRAMES
-model_path = 'checkpoints/rainbow_11/rainbow_dqn_mario_local8000.pth'
+model_path = 'checkpoints/rainbow_11/rainbow_dqn_mario_7918_backup.pth'
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 class Agent:
     def __init__(self):
