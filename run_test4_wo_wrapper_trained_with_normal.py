@@ -9,8 +9,7 @@ from gym_super_mario_bros.actions import COMPLEX_MOVEMENT
 import time
 
 # 请确保下面这两个类已经和训练时完全一样地定义过，或者从你的训练代码里 import 进来
-from student_agent_wo_wrapper_trained_with_normal_self import InferenceAgent
-
+# from student_agent_wo_wrapper_trained_with_normal_self import InferenceAgent
 if __name__ == "__main__":
     MAX_EPISODE_STEPS = 3000
     import gym_super_mario_bros
@@ -22,13 +21,26 @@ if __name__ == "__main__":
     env   = JoypadSpace(env, COMPLEX_MOVEMENT)
     env   = TimeLimit(env, max_episode_steps=MAX_EPISODE_STEPS)
 
+    
     # 2. 实例化推理 Agent（载入你训练好的 checkpoint）
-    agent = InferenceAgent('checkpoints/rainbow_11/rainbow_dqn_mario.pth', device='cpu')
+    # from student_agent_wo_wrapper_trained_with_normal_self import InferenceAgent
+    # agent = InferenceAgent('checkpoints/rainbow_11/rainbow_dqn_mario.pth', device='cpu')
+
+    # from student_agent_wo_wrapper_trained_with_normal_self_ICM import InferenceAgent
+    # agent = InferenceAgent('checkpoints/rainbow_icm/rainbow_icm.pth', device='cpu')
 
     # 3. 跑十集
     rewards = []
     for ep in range(10):
-        agent = InferenceAgent('checkpoints/rainbow_11/rainbow_dqn_mario.pth', device='cpu')
+
+        # ICM
+        # from student_agent_wo_wrapper_trained_with_normal_self_ICM import InferenceAgent
+        # agent = InferenceAgent('checkpoints/rainbow_icm/rainbow_icm.pth', device='cpu')
+        
+        # Normal
+        from student_agent_wo_wrapper_trained_with_normal_self import InferenceAgent
+        agent = InferenceAgent('checkpoints/rainbow_11/rainbow_dqn_mario_local8000.pth', device='cpu')
+
         obs   = env.reset()   # raw RGB frame, shape=(240,256,3)
         done  = False
         total = 0
@@ -43,7 +55,7 @@ if __name__ == "__main__":
             total += r
             # print(f"Step {steps:4d}  Action {a:2d}  Reward {r:.2f}  Total {total:.2f}")
             env.render()
-            # time.sleep(0.1)
+            time.sleep(0.02)
         print(f"Episode {ep+1:2d} → reward = {total:6.1f}")
         rewards.append(total)
 
