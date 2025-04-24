@@ -39,7 +39,7 @@ if __name__ == "__main__":
         
         # Normal
         from student_agent_wo_wrapper_trained_with_normal_self import InferenceAgent
-        agent = InferenceAgent('checkpoints/rainbow_11/rainbow_dqn_mario_local8000.pth', device='cpu')
+        agent = InferenceAgent('checkpoints/rainbow_11/rainbow_dqn_mario.pth', device='cpu')
 
         obs   = env.reset()   # raw RGB frame, shape=(240,256,3)
         done  = False
